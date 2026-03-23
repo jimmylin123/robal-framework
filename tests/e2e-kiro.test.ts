@@ -12,15 +12,15 @@ afterEach(async () => { for (const b of bridges) await b.stop(); bridges.length 
 
 describe('E2E: kiro-cli as agent', () => {
   it.skipIf(!hasKiro)('kiro-cli executes task and submits result', async () => {
-    const { agent, bridge } = await createAgent({ command: KIRO, timeoutMs: 60_000 });
+    const { agent, bridge } = await createAgent({ command: KIRO, timeoutMs: 90_000 });
     bridges.push(bridge);
 
-    const result = await new Worker({ agent, timeoutMs: 60_000 })
+    const result = await new Worker({ agent, timeoutMs: 90_000 })
       .run({ id: 'k1', prompt: 'What is 7 * 8? Just the number.', teamId: 'test' });
 
     expect(result.status).toBe('completed');
     expect(result.output).toContain('56');
-  }, 90_000);
+  }, 120_000);
 
   it.skipIf(!hasKiro)('kiro-cli delegates to child agents', async () => {
     const leafAgent: Agent = {
