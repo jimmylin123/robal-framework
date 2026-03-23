@@ -145,37 +145,92 @@ export class AgentBridge {
 }
 
 /**
+ * Builds the capability instructions the framework injects for the agent.
+ * The agent receives these so it knows what it can do — delegate, submit results, etc.
+ */
+function buildInstructions(baseUrl: string, canDelegate: boolean, task: TaskInput): string {
+  const lines: string[] = [
+    '=== ROBAL FRAMEWORK ===',
+    'You are an agent managed by the Robal orchestration framework.',
+    '',
+    `Your task: ${task.prompt}`,
+  ];
+
+  if (task.feedback) {
+    lines.push('', `Previous attempt was rejected. Feedback: ${task.feedback}`);
+  }
+
+  if (task.context?.previousOutputs?.length) {
+    lines.push('', 'Context from previous steps:', ...task.context.previousOutputs.map((o, i) => `[Step ${i + 1}]: ${o}`));
+  }
+
+  lines.push(
+    '',
+    '=== AVAILABLE ACTIONS ===',
+    '',
+    '1. SUBMIT YOUR RESULT (required when done):',
+    `   curl -s -X POST ${baseUrl}/submit-result -H "Content-Type: application/json" -d '{"status":"completed","output":"YOUR_OUTPUT"}'`,
+    '   Replace YOUR_OUTPUT with your final answer/output.',
+  );
+
+  if (canDelegate) {
+    lines.push(
+      '',
+      '2. DELEGATE TO SUB-AGENTS (optional — if the task is complex, break it up):',
+      `   curl -s -X POST ${baseUrl}/delegate -H "Content-Type: application/json" -d '{"subtasks":[{"prompt":"subtask 1"},{"prompt":"subtask 2"}]}'`,
+      '   This returns {"results":["output1","output2"]} with each sub-agent\'s output.',
+      '   You can then use these results to compose your final answer.',
+    );
+  }
+
+  lines.push(
+    '',
+    '3. READ FULL TASK DETAILS (optional):',
+    `   curl -s ${baseUrl}/task`,
+    '',
+    '=== INSTRUCTIONS ===',
+    canDelegate
+      ? 'Decide: either do the work yourself, or delegate subtasks to sub-agents. Then submit your result.'
+      : 'Do the work and submit your result.',
+    '===================',
+  );
+
+  return lines.join('\n');
+}
+
+/**
  * Wraps any external process as an Agent by exposing the bridge server.
  *
  * Two modes:
- * - **return mode**: `run` returns a string → used as output (simple scripts)
- * - **bridge mode**: `run` returns void, agent POSTs to /submit-result (any process)
+ * - **Simple mode**: just pass `command` — the framework builds the full prompt
+ *   with capability instructions and pipes it to your command.
+ * - **Custom mode**: pass `run` for full control over how the agent is invoked.
  *
- * The agent process receives env vars:
- *   ROBAL_BRIDGE_URL    — base URL of the bridge server
- *   ROBAL_TASK_URL      — GET to read current task
- *   ROBAL_DELEGATE_URL  — POST to delegate subtasks
- *   ROBAL_RESULT_URL    — POST to submit final result
- *   ROBAL_PROMPT        — the task prompt
- *   ROBAL_CAN_DELEGATE  — "true" or "false"
- *   ROBAL_DEPTH         — current depth in hierarchy
- *   ROBAL_FEEDBACK      — reviewer feedback (if retrying)
+ * The agent process receives env vars including ROBAL_INSTRUCTIONS which contains
+ * the full prompt with task, context, and available actions (delegate, submit, etc).
+ * The agent just needs to follow the instructions.
  *
  * @example
  * ```ts
- * // Any CLI tool — it reads env vars and POSTs result back
- * const { agent, bridge } = await createBridgedAgent({
+ * // Simple: framework builds prompt, pipes to your CLI
+ * const { agent } = await createBridgedAgent({
+ *   command: 'kiro-cli chat --no-interactive --trust-all-tools',
+ * });
+ *
+ * // Custom: full control
+ * const { agent } = await createBridgedAgent({
  *   run: async (task, env) => {
- *     execSync(`my-agent-cli`, { env: { ...process.env, ...env } });
- *     // Agent POSTs to ROBAL_RESULT_URL when done — no return needed
+ *     execSync(`my-agent`, { env: { ...process.env, ...env } });
  *   },
  * });
  * ```
  */
 export async function createBridgedAgent(opts: {
-  run: (task: TaskInput, env: Record<string, string>) => Promise<string | void>;
+  /** Shell command to run. Framework pipes ROBAL_INSTRUCTIONS as stdin. */
+  command?: string;
+  /** Custom run function for full control. */
+  run?: (task: TaskInput, env: Record<string, string>) => Promise<string | void>;
   port?: number;
-  /** Timeout waiting for agent to submit result (ms). Default 300000 (5 min). */
   timeoutMs?: number;
 }): Promise<{ agent: Agent; bridge: AgentBridge }> {
   const bridge = new AgentBridge(opts.port || 0);
@@ -191,6 +246,9 @@ export async function createBridgedAgent(opts: {
         submitReview: () => {},
       });
 
+      const canDelegate = !!task.delegate;
+      const instructions = buildInstructions(baseUrl, canDelegate, task);
+
       const env: Record<string, string> = {
         ROBAL_BRIDGE_URL: baseUrl,
         ROBAL_TASK_URL: `${baseUrl}/task`,
@@ -199,14 +257,37 @@ export async function createBridgedAgent(opts: {
         ROBAL_TASK_ID: task.id,
         ROBAL_TEAM_ID: task.teamId,
         ROBAL_PROMPT: task.prompt,
-        ROBAL_CAN_DELEGATE: task.delegate ? 'true' : 'false',
+        ROBAL_CAN_DELEGATE: canDelegate ? 'true' : 'false',
         ROBAL_DEPTH: String(task.depth ?? 0),
+        ROBAL_INSTRUCTIONS: instructions,
         ...(task.feedback ? { ROBAL_FEEDBACK: task.feedback } : {}),
       };
 
       try {
         const resultPromise = bridge.waitForResult();
-        const runResult = await opts.run(task, env);
+        let runResult: string | void;
+
+        if (opts.command) {
+          // Command mode: pipe instructions to the command
+          // Always wait for bridge result — ignore stdout
+          await new Promise<void>((resolve, reject) => {
+            const child = require('child_process').spawn('bash', ['-c', opts.command!], {
+              env: { ...process.env, ...env },
+              timeout: timeout,
+            });
+            child.stdin.write(env.ROBAL_INSTRUCTIONS);
+            child.stdin.end();
+            child.stdout.on('data', () => {});
+            child.stderr.on('data', () => {});
+            child.on('close', (code: number) => code === 0 ? resolve() : reject(new Error(`exit ${code}`)));
+            child.on('error', reject);
+          });
+          runResult = undefined;
+        } else if (opts.run) {
+          runResult = await opts.run(task, env);
+        } else {
+          throw new Error('Either command or run must be provided');
+        }
 
         // If run() returned a string, use it directly (return mode)
         if (typeof runResult === 'string') {
