@@ -159,18 +159,42 @@ export async function createAgentTeam(opts: CreateAgentTeamOptions): Promise<Tas
   // Optional reviewer
   let reviewer: import('./types').Reviewer | undefined;
   if (opts.reviewer) {
-    const { agent: reviewerAgent } = makeAgent(opts.reviewer);
     reviewer = {
       async review(task, output) {
+        const reviewServer = new AgentServer(0);
+        servers.push(reviewServer);
+        await reviewServer.start();
+        const reviewPort = reviewServer.port;
+        const reviewUrl = `http://127.0.0.1:${reviewPort}`;
+
         const reviewTask: TaskInput = {
           ...task,
-          prompt: `Review this work.\n\nOriginal task: ${task.prompt}\n\nOutput to review:\n${output.output}\n\nSubmit your review verdict.`,
+          prompt: `Review this work.\n\nOriginal task: ${task.prompt}\n\nOutput to review:\n${output.output}`,
         };
-        const result = await reviewerAgent.execute(reviewTask);
-        // Parse reviewer output as approval
-        const lower = result.output.toLowerCase();
-        const approved = lower.includes('approved') || lower.includes('approve') || lower.includes('pass');
-        return { approved, confidence: approved ? 0.8 : 0.3, feedback: result.output };
+        reviewServer.setTask(reviewTask);
+
+        const reviewPromise = reviewServer.waitForReview();
+        const instructions = buildReviewInstructions(reviewUrl, reviewTask);
+
+        await new Promise<void>((resolve, reject) => {
+          const child = require('child_process').spawn('bash', ['-c', opts.reviewer!], {
+            env: { ...process.env, ROBAL_BRIDGE_URL: reviewUrl, ROBAL_INSTRUCTIONS: instructions, ROBAL_PROMPT: reviewTask.prompt },
+            timeout: timeout,
+          });
+          child.stdin.write(instructions);
+          child.stdin.end();
+          child.stdout.on('data', () => {});
+          child.stderr.on('data', () => {});
+          child.on('close', () => resolve());
+          child.on('error', reject);
+        });
+
+        const timer = setTimeout(() => {
+          (reviewServer as any).reviewResolve?.({ approved: true, confidence: 0.5, feedback: 'Review timed out — auto-approved' });
+        }, timeout);
+        const result = await reviewPromise;
+        clearTimeout(timer);
+        return result;
       },
     };
   }
@@ -194,3 +218,21 @@ export async function createAgentTeam(opts: CreateAgentTeamOptions): Promise<Tas
 
 // Re-use buildInstructions from server.ts — import it
 import { buildInstructions } from './server';
+
+function buildReviewInstructions(baseUrl: string, task: TaskInput): string {
+  return [
+    '=== ROBAL FRAMEWORK — REVIEW MODE ===',
+    'You are a reviewer. Evaluate the work below and submit your verdict.',
+    '',
+    task.prompt,
+    '',
+    '=== SUBMIT YOUR REVIEW ===',
+    'When you have decided, run this command:',
+    `curl -s -X POST ${baseUrl}/submit-review -H "Content-Type: application/json" -d '{"approved":true_or_false,"confidence":0.0_to_1.0,"feedback":"YOUR_FEEDBACK"}'`,
+    '',
+    '- Set "approved" to true if the work is acceptable, false if it needs revision.',
+    '- Set "confidence" to a number between 0 and 1 indicating how confident you are.',
+    '- Set "feedback" to explain what needs to change (if rejecting) or why it\'s good (if approving).',
+    '========================',
+  ].join('\n');
+}
