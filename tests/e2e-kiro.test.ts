@@ -90,4 +90,19 @@ describe('E2E: kiro-cli as agent', () => {
     expect(result.output.length).toBeGreaterThan(0);
     expect(attempts).toBe(2);
   }, 180_000);
+
+  it.skipIf(!hasKiro)('createAgentTeam with kiro-cli as both worker and reviewer', async () => {
+    const { createAgentTeam } = await import('../src/createAgentTeam');
+
+    const result = await createAgentTeam({
+      rootAgent: KIRO,
+      prompt: 'What is the largest planet in our solar system? One word answer.',
+      reviewer: KIRO,
+      maxCycles: 2,
+      timeoutMs: 90_000,
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.output.length).toBeGreaterThan(0);
+  }, 240_000);
 });
