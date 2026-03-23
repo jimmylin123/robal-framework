@@ -2,7 +2,7 @@
 
 Agent orchestration framework. Plug any AI agents, delegate work, review output, coordinate teams.
 
-robal-framework is **not** an agent — it's the layer that makes agents work together. Bring any CLI agent (Kiro, Claude Code, Aider, custom scripts) and this framework handles delegation, review cycles, and multi-agent coordination.
+robal-framework is **not** an agent — it's the layer that makes agents work together. Bring any CLI agent (Kiro, Claude Code, OpenClaw, Codex, Aider, custom scripts) and this framework handles delegation, review cycles, and multi-agent coordination.
 
 ## Install
 
