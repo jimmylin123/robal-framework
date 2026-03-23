@@ -72,6 +72,7 @@ export class Worker {
     this.emit('working');
     let lastOutput: TaskOutput = { status: 'failed', output: '', error: 'No execution' };
     let feedback: string | undefined;
+    let previousOutput: string | undefined;
 
     for (let attempt = 1; attempt <= this.maxCycles; attempt++) {
       if (this.aborted) { this.emit('canceled'); return { status: 'failed', output: '', error: 'Canceled' }; }
@@ -81,7 +82,7 @@ export class Worker {
       const delegateHandle = this.depth < this.maxDepth
         ? (subtasks: { prompt: string; name?: string; agent?: Agent }[]) => this.delegate(subtasks, task)
         : undefined;
-      const input: TaskInput = { ...task, feedback, attempt, depth: this.depth, delegate: delegateHandle };
+      const input: TaskInput = { ...task, feedback, previousOutput, attempt, depth: this.depth, delegate: delegateHandle };
       try {
         lastOutput = await this.executeWithTimeout(input);
       } catch (err: any) {
@@ -121,6 +122,7 @@ export class Worker {
 
       // Rejected — feed back for next attempt
       feedback = review.feedback;
+      previousOutput = lastOutput.output;
       if (attempt === this.maxCycles) {
         this.emit('completed', lastOutput.output);
         return lastOutput;

@@ -56,6 +56,8 @@ export interface TaskInput {
   constraints?: TaskConstraints;
   /** Feedback from a previous review cycle (retry) */
   feedback?: string;
+  /** Output from the previous attempt (so the agent can iterate on it) */
+  previousOutput?: string;
   /** Which attempt this is (1-based) */
   attempt?: number;
   /** Current depth in the delegation hierarchy (0 = root) */

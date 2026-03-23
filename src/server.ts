@@ -164,6 +164,9 @@ export function buildInstructions(baseUrl: string, canDelegate: boolean, task: T
 
   if (task.feedback) {
     lines.push('', `Previous attempt was rejected. Feedback: ${task.feedback}`);
+    if (task.previousOutput) {
+      lines.push('', `Your previous output was:`, task.previousOutput);
+    }
   }
 
   if (task.context?.previousOutputs?.length) {
