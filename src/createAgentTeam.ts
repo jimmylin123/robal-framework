@@ -63,6 +63,12 @@ export async function createAgentTeam(opts: CreateAgentTeamOptions): Promise<Tas
     agentDescriptions.push({ name: a.name, description: a.description });
   }
 
+  // Root agent is always available for delegation (self-delegation)
+  if (!agentCommands.has('root')) {
+    agentCommands.set('root', opts.rootAgent);
+    agentDescriptions.push({ name: 'root', description: 'Same agent as you — delegate subtasks to yourself' });
+  }
+
   // Create an Agent from a shell command
   function makeAgent(command: string): { agent: Agent; server: AgentServer } {
     const server = new AgentServer(0);
@@ -139,12 +145,8 @@ export async function createAgentTeam(opts: CreateAgentTeamOptions): Promise<Tas
           delegate: (subtasks) => {
             const resolved = subtasks.map(sub => {
               const cmd = sub.name ? agentCommands.get(sub.name) : undefined;
-              if (cmd) {
-                const { agent: childAgent } = makeAgent(cmd);
-                return { ...sub, agent: childAgent };
-              }
-              // No matching agent name — use root agent
-              return sub;
+              const { agent: childAgent } = makeAgent(cmd || opts.rootAgent);
+              return { ...sub, agent: childAgent };
             });
             return origDelegate(resolved);
           },
