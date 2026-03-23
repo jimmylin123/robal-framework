@@ -144,11 +144,17 @@ export class AgentBridge {
   }
 }
 
+/** Description of an available agent for delegation */
+export interface AvailableAgent {
+  name: string;
+  description: string;
+}
+
 /**
  * Builds the capability instructions the framework injects for the agent.
  * The agent receives these so it knows what it can do — delegate, submit results, etc.
  */
-function buildInstructions(baseUrl: string, canDelegate: boolean, task: TaskInput): string {
+function buildInstructions(baseUrl: string, canDelegate: boolean, task: TaskInput, availableAgents?: AvailableAgent[]): string {
   const lines: string[] = [
     '=== ROBAL FRAMEWORK ===',
     'You are an agent managed by the Robal orchestration framework.',
@@ -177,10 +183,19 @@ function buildInstructions(baseUrl: string, canDelegate: boolean, task: TaskInpu
     lines.push(
       '',
       '2. DELEGATE TO SUB-AGENTS (optional — if the task is complex, break it up):',
-      `   curl -s -X POST ${baseUrl}/delegate -H "Content-Type: application/json" -d '{"subtasks":[{"prompt":"subtask 1"},{"prompt":"subtask 2"}]}'`,
+      `   curl -s -X POST ${baseUrl}/delegate -H "Content-Type: application/json" -d '{"subtasks":[{"prompt":"subtask 1","name":"agent-name"},{"prompt":"subtask 2","name":"agent-name"}]}'`,
       '   This returns {"results":["output1","output2"]} with each sub-agent\'s output.',
       '   You can then use these results to compose your final answer.',
+      '   Use the "name" field to pick which agent handles each subtask.',
     );
+
+    if (availableAgents?.length) {
+      lines.push(
+        '',
+        '   Available agents you can delegate to:',
+        ...availableAgents.map(a => `   - "${a.name}": ${a.description}`),
+      );
+    }
   }
 
   lines.push(
@@ -230,6 +245,8 @@ export async function createBridgedAgent(opts: {
   command?: string;
   /** Custom run function for full control. */
   run?: (task: TaskInput, env: Record<string, string>) => Promise<string | void>;
+  /** Agents available for delegation. Shown to the agent so it knows who to delegate to. */
+  availableAgents?: AvailableAgent[];
   port?: number;
   timeoutMs?: number;
 }): Promise<{ agent: Agent; bridge: AgentBridge }> {
@@ -247,7 +264,7 @@ export async function createBridgedAgent(opts: {
       });
 
       const canDelegate = !!task.delegate;
-      const instructions = buildInstructions(baseUrl, canDelegate, task);
+      const instructions = buildInstructions(baseUrl, canDelegate, task, opts.availableAgents);
 
       const env: Record<string, string> = {
         ROBAL_BRIDGE_URL: baseUrl,
