@@ -195,4 +195,4 @@ const myAgent: Agent = {
 
 ## License
 
-MIT
+Apache 2.0

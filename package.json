@@ -23,7 +23,7 @@
     "multi-agent",
     "framework"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "devDependencies": {
     "@types/node": "^25.5.0",
     "typescript": "^5.4.0",
