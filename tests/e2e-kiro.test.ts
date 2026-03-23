@@ -1,18 +1,18 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { execSync } from 'child_process';
-import { createBridgedAgent, AgentBridge } from '../src/bridge';
+import { createAgent, AgentServer } from '../src/server';
 import { Orchestrator, Worker } from '../src';
 import type { Agent } from '../src';
 
 const hasKiro = (() => { try { execSync('which kiro-cli', { stdio: 'pipe' }); return true; } catch { return false; } })();
 const KIRO = 'kiro-cli chat --no-interactive --trust-all-tools';
 
-const bridges: AgentBridge[] = [];
+const bridges: AgentServer[] = [];
 afterEach(async () => { for (const b of bridges) await b.stop(); bridges.length = 0; });
 
 describe('E2E: kiro-cli as agent', () => {
   it.skipIf(!hasKiro)('kiro-cli executes task and submits result', async () => {
-    const { agent, bridge } = await createBridgedAgent({ command: KIRO, timeoutMs: 60_000 });
+    const { agent, bridge } = await createAgent({ command: KIRO, timeoutMs: 60_000 });
     bridges.push(bridge);
 
     const result = await new Worker({ agent, timeoutMs: 60_000 })
@@ -29,7 +29,7 @@ describe('E2E: kiro-cli as agent', () => {
       },
     };
 
-    const { agent: kiroAgent, bridge } = await createBridgedAgent({ command: KIRO, timeoutMs: 120_000 });
+    const { agent: kiroAgent, bridge } = await createAgent({ command: KIRO, timeoutMs: 120_000 });
     bridges.push(bridge);
 
     const wrapper: Agent = {
@@ -48,7 +48,7 @@ describe('E2E: kiro-cli as agent', () => {
   }, 180_000);
 
   it.skipIf(!hasKiro)('kiro-cli in a multi-team pipeline', async () => {
-    const { agent: kiroAgent, bridge } = await createBridgedAgent({ command: KIRO, timeoutMs: 60_000 });
+    const { agent: kiroAgent, bridge } = await createAgent({ command: KIRO, timeoutMs: 60_000 });
     bridges.push(bridge);
 
     const upperAgent: Agent = {
@@ -66,7 +66,7 @@ describe('E2E: kiro-cli as agent', () => {
 
   it.skipIf(!hasKiro)('kiro-cli with review cycle', async () => {
     let attempts = 0;
-    const { agent: kiroAgent, bridge } = await createBridgedAgent({ command: KIRO, timeoutMs: 60_000 });
+    const { agent: kiroAgent, bridge } = await createAgent({ command: KIRO, timeoutMs: 60_000 });
     bridges.push(bridge);
 
     // Wrap to count attempts

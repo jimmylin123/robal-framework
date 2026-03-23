@@ -17,7 +17,7 @@ export interface BridgeHandlers {
  *   GET  /task           — get current task info
  *   GET  /health         — health check
  */
-export class AgentBridge {
+export class AgentServer {
   private server: http.Server | null = null;
   private handlers: BridgeHandlers | null = null;
   private currentTask: TaskInput | null = null;
@@ -154,7 +154,7 @@ export interface AvailableAgent {
  * Builds the capability instructions the framework injects for the agent.
  * The agent receives these so it knows what it can do — delegate, submit results, etc.
  */
-function buildInstructions(baseUrl: string, canDelegate: boolean, task: TaskInput, availableAgents?: AvailableAgent[]): string {
+export function buildInstructions(baseUrl: string, canDelegate: boolean, task: TaskInput, availableAgents?: AvailableAgent[]): string {
   const lines: string[] = [
     '=== ROBAL FRAMEWORK ===',
     'You are an agent managed by the Robal orchestration framework.',
@@ -228,19 +228,19 @@ function buildInstructions(baseUrl: string, canDelegate: boolean, task: TaskInpu
  * @example
  * ```ts
  * // Simple: framework builds prompt, pipes to your CLI
- * const { agent } = await createBridgedAgent({
+ * const { agent } = await createAgent({
  *   command: 'kiro-cli chat --no-interactive --trust-all-tools',
  * });
  *
  * // Custom: full control
- * const { agent } = await createBridgedAgent({
+ * const { agent } = await createAgent({
  *   run: async (task, env) => {
  *     execSync(`my-agent`, { env: { ...process.env, ...env } });
  *   },
  * });
  * ```
  */
-export async function createBridgedAgent(opts: {
+export async function createAgent(opts: {
   /** Shell command to run. Framework pipes ROBAL_INSTRUCTIONS as stdin. */
   command?: string;
   /** Custom run function for full control. */
@@ -249,8 +249,8 @@ export async function createBridgedAgent(opts: {
   availableAgents?: AvailableAgent[];
   port?: number;
   timeoutMs?: number;
-}): Promise<{ agent: Agent; bridge: AgentBridge }> {
-  const bridge = new AgentBridge(opts.port || 0);
+}): Promise<{ agent: Agent; bridge: AgentServer }> {
+  const bridge = new AgentServer(opts.port || 0);
   const port = await bridge.start();
   const baseUrl = `http://127.0.0.1:${port}`;
   const timeout = opts.timeoutMs ?? 300_000;
@@ -332,7 +332,7 @@ export async function createBridgedAgent(opts: {
 /**
  * Creates a Reviewer that waits for an external process to POST to /submit-review.
  */
-export function createBridgedReviewer(bridge: AgentBridge): {
+export function createReviewer(bridge: AgentServer): {
   reviewer: import('./types').Reviewer;
 } {
   return {

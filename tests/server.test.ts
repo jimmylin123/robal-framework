@@ -1,17 +1,17 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { AgentBridge, createBridgedAgent, createBridgedReviewer } from '../src/bridge';
+import { AgentServer, createAgent, createReviewer } from '../src/server';
 import { Worker } from '../src/worker';
 import type { Agent, TaskInput } from '../src/types';
 
-let bridges: AgentBridge[] = [];
+let bridges: AgentServer[] = [];
 afterEach(async () => {
   for (const b of bridges) await b.stop();
   bridges = [];
 });
 
-describe('AgentBridge', () => {
+describe('AgentServer', () => {
   it('serves /health', async () => {
-    const bridge = new AgentBridge(0);
+    const bridge = new AgentServer(0);
     const port = await bridge.start();
     bridges.push(bridge);
 
@@ -22,7 +22,7 @@ describe('AgentBridge', () => {
   });
 
   it('serves /task with current task', async () => {
-    const bridge = new AgentBridge(0);
+    const bridge = new AgentServer(0);
     const port = await bridge.start();
     bridges.push(bridge);
 
@@ -35,7 +35,7 @@ describe('AgentBridge', () => {
   });
 
   it('handles /delegate', async () => {
-    const bridge = new AgentBridge(0);
+    const bridge = new AgentServer(0);
     const port = await bridge.start();
     bridges.push(bridge);
 
@@ -54,7 +54,7 @@ describe('AgentBridge', () => {
   });
 
   it('handles /submit-review', async () => {
-    const bridge = new AgentBridge(0);
+    const bridge = new AgentServer(0);
     const port = await bridge.start();
     bridges.push(bridge);
 
@@ -74,11 +74,11 @@ describe('AgentBridge', () => {
   });
 });
 
-describe('createBridgedAgent', () => {
+describe('createAgent', () => {
   it('passes env vars to the run function', async () => {
     let capturedEnv: Record<string, string> = {};
 
-    const { agent, bridge } = await createBridgedAgent({
+    const { agent, bridge } = await createAgent({
       run: async (task, env) => {
         capturedEnv = env;
         return `result: ${task.prompt}`;
@@ -103,7 +103,7 @@ describe('createBridgedAgent', () => {
       },
     };
 
-    const { agent, bridge } = await createBridgedAgent({
+    const { agent, bridge } = await createAgent({
       run: async (task, env) => {
         if (env.ROBAL_CAN_DELEGATE === 'true') {
           const res = await fetch(env.ROBAL_DELEGATE_URL, {
@@ -144,13 +144,13 @@ describe('createBridgedAgent', () => {
   });
 });
 
-describe('createBridgedReviewer', () => {
+describe('createReviewer', () => {
   it('reviewer receives verdict via HTTP', async () => {
-    const bridge = new AgentBridge(0);
+    const bridge = new AgentServer(0);
     const port = await bridge.start();
     bridges.push(bridge);
 
-    const { reviewer } = createBridgedReviewer(bridge);
+    const { reviewer } = createReviewer(bridge);
 
     // Start review (will wait for HTTP POST)
     const reviewPromise = reviewer.review(

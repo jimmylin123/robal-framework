@@ -1,11 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { Orchestrator, Worker, createBridgedAgent, createBridgedReviewer, AgentBridge } from '../src';
+import { Orchestrator, Worker, createAgent, createReviewer, AgentServer } from '../src';
 import type { Agent, Reviewer, TaskInput } from '../src';
 
 // These tests simulate real-world multi-agent scenarios end-to-end.
 // No mocks — actual async execution, HTTP bridge calls, deep hierarchies.
 
-const bridges: AgentBridge[] = [];
+const bridges: AgentServer[] = [];
 
 afterEach(async () => {
   for (const b of bridges) await b.stop();
@@ -142,7 +142,7 @@ describe('E2E: HTTP bridge delegation', () => {
       },
     };
 
-    const { agent, bridge } = await createBridgedAgent({
+    const { agent, bridge } = await createAgent({
       run: async (task, env) => {
         // Simulate an external process that reads env and calls HTTP
         if (env.ROBAL_CAN_DELEGATE === 'true') {
@@ -197,11 +197,11 @@ describe('E2E: HTTP bridge review', () => {
       },
     };
 
-    const reviewBridge = new AgentBridge(0);
+    const reviewBridge = new AgentServer(0);
     const port = await reviewBridge.start();
     bridges.push(reviewBridge);
 
-    const { reviewer } = createBridgedReviewer(reviewBridge);
+    const { reviewer } = createReviewer(reviewBridge);
 
     // Simulate external reviewer responding after a short delay
     const worker = new Worker({ agent, reviewer, maxCycles: 3 });

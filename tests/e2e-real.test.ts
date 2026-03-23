@@ -1,10 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { spawn } from 'child_process';
-import { createBridgedAgent, createBridgedReviewer, AgentBridge } from '../src/bridge';
+import { createAgent, createReviewer, AgentServer } from '../src/server';
 import { Orchestrator, Worker } from '../src';
 import type { Agent, Reviewer } from '../src';
 
-const bridges: AgentBridge[] = [];
+const bridges: AgentServer[] = [];
 afterEach(async () => {
   for (const b of bridges) await b.stop();
   bridges.length = 0;
@@ -27,7 +27,7 @@ function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
 describe('Bridge: basic protocol', () => {
   it('agent reads task, does work, POSTs result', async () => {
-    const { agent, bridge } = await createBridgedAgent({
+    const { agent, bridge } = await createAgent({
       run: async (_task, env) => {
         await sh(`curl -s -X POST ${env.ROBAL_RESULT_URL} -H 'Content-Type: application/json' -d '{"status":"completed","output":"processed: '${env.ROBAL_PROMPT}'"}'`, env);
       },
@@ -40,7 +40,7 @@ describe('Bridge: basic protocol', () => {
 
   it('agent reads full task context from GET /task', async () => {
     let taskFromBridge: any = null;
-    const { agent, bridge } = await createBridgedAgent({
+    const { agent, bridge } = await createAgent({
       run: async (_task, env) => {
         const json = await sh(`curl -s ${env.ROBAL_TASK_URL}`, env);
         taskFromBridge = JSON.parse(json);
@@ -60,7 +60,7 @@ describe('Bridge: basic protocol', () => {
   });
 
   it('agent reports failure via POST', async () => {
-    const { agent, bridge } = await createBridgedAgent({
+    const { agent, bridge } = await createAgent({
       run: async (_task, env) => {
         await sh(`curl -s -X POST ${env.ROBAL_RESULT_URL} -H 'Content-Type: application/json' -d '{"status":"failed","output":"","error":"disk full"}'`, env);
       },
@@ -72,7 +72,7 @@ describe('Bridge: basic protocol', () => {
   });
 
   it('agent reports artifacts and usage', async () => {
-    const { agent, bridge } = await createBridgedAgent({
+    const { agent, bridge } = await createAgent({
       run: async (_task, env) => {
         const body = JSON.stringify({
           status: 'completed', output: 'done',
@@ -98,7 +98,7 @@ describe('Bridge: delegation', () => {
     const leafAgent: Agent = {
       async execute(task) { return { status: 'completed', output: `leaf:${task.prompt}` }; },
     };
-    const { agent, bridge } = await createBridgedAgent({
+    const { agent, bridge } = await createAgent({
       run: async (_task, env) => {
         const res = await sh(`curl -s -X POST ${env.ROBAL_DELEGATE_URL} -H 'Content-Type: application/json' -d '{"subtasks":[{"prompt":"a"},{"prompt":"b"}]}'`, env);
         const { results } = JSON.parse(res);
@@ -118,7 +118,7 @@ describe('Bridge: delegation', () => {
   });
 
   it('agent gets error when delegating at max depth', async () => {
-    const { agent, bridge } = await createBridgedAgent({
+    const { agent, bridge } = await createAgent({
       run: async (_task, env) => {
         if (env.ROBAL_CAN_DELEGATE === 'true') {
           await sh(`curl -s -X POST ${env.ROBAL_DELEGATE_URL} -H 'Content-Type: application/json' -d '{"subtasks":[{"prompt":"x"}]}'`, env);
@@ -147,7 +147,7 @@ describe('Bridge: delegation', () => {
         return { status: 'completed', output: `mgr-leaf:${task.prompt}` };
       },
     };
-    const { agent: shellCeo, bridge } = await createBridgedAgent({
+    const { agent: shellCeo, bridge } = await createAgent({
       run: async (_task, env) => {
         const res = await sh(`curl -s -X POST ${env.ROBAL_DELEGATE_URL} -H 'Content-Type: application/json' -d '{"subtasks":[{"prompt":"eng"},{"prompt":"mkt"}]}'`, env);
         const { results } = JSON.parse(res);
@@ -182,10 +182,10 @@ describe('Bridge: review cycle', () => {
         return { status: 'completed', output: task.feedback ? 'v2-improved' : 'v1-draft' };
       },
     };
-    const reviewBridge = new AgentBridge(0);
+    const reviewBridge = new AgentServer(0);
     const port = await reviewBridge.start();
     bridges.push(reviewBridge);
-    const { reviewer } = createBridgedReviewer(reviewBridge);
+    const { reviewer } = createReviewer(reviewBridge);
 
     const worker = new Worker({ agent, reviewer, maxCycles: 3 });
     const promise = worker.run({ id: 'r1', prompt: 'write', teamId: 'test' });
@@ -209,10 +209,10 @@ describe('Bridge: review cycle', () => {
     const agent: Agent = {
       async execute() { attempts++; return { status: 'completed', output: `attempt-${attempts}` }; },
     };
-    const reviewBridge = new AgentBridge(0);
+    const reviewBridge = new AgentServer(0);
     const port = await reviewBridge.start();
     bridges.push(reviewBridge);
-    const { reviewer } = createBridgedReviewer(reviewBridge);
+    const { reviewer } = createReviewer(reviewBridge);
 
     const worker = new Worker({ agent, reviewer, maxCycles: 2 });
     const promise = worker.run({ id: 'r2', prompt: 'write', teamId: 'test' });
@@ -236,10 +236,10 @@ describe('Bridge: review cycle', () => {
         return { status: 'completed', output: 'output' };
       },
     };
-    const reviewBridge = new AgentBridge(0);
+    const reviewBridge = new AgentServer(0);
     const port = await reviewBridge.start();
     bridges.push(reviewBridge);
-    const { reviewer } = createBridgedReviewer(reviewBridge);
+    const { reviewer } = createReviewer(reviewBridge);
 
     const worker = new Worker({ agent, reviewer, maxCycles: 3 });
     const promise = worker.run({ id: 'r3', prompt: 'go', teamId: 'test' });
@@ -259,13 +259,13 @@ describe('Bridge: review cycle', () => {
 
 describe('Bridge: pipelines', () => {
   it('linear pipeline: shell agent A → shell agent B', async () => {
-    const { agent: a1, bridge: b1 } = await createBridgedAgent({
+    const { agent: a1, bridge: b1 } = await createAgent({
       run: async (_task, env) => {
         await sh(`curl -s -X POST ${env.ROBAL_RESULT_URL} -H 'Content-Type: application/json' -d '{"status":"completed","output":"from-A"}'`, env);
       },
     });
     bridges.push(b1);
-    const { agent: a2, bridge: b2 } = await createBridgedAgent({
+    const { agent: a2, bridge: b2 } = await createAgent({
       run: async (_task, env) => {
         const taskJson = await sh(`curl -s ${env.ROBAL_TASK_URL}`, env);
         const t = JSON.parse(taskJson);
@@ -283,7 +283,7 @@ describe('Bridge: pipelines', () => {
   });
 
   it('3-stage pipeline: shell → JS → shell', async () => {
-    const { agent: shell1, bridge: b1 } = await createBridgedAgent({
+    const { agent: shell1, bridge: b1 } = await createAgent({
       run: async (_task, env) => {
         await sh(`curl -s -X POST ${env.ROBAL_RESULT_URL} -H 'Content-Type: application/json' -d '{"status":"completed","output":"raw-data"}'`, env);
       },
@@ -294,7 +294,7 @@ describe('Bridge: pipelines', () => {
       async execute(task) { return { status: 'completed', output: `processed:${task.prompt}` }; },
     };
 
-    const { agent: shell2, bridge: b2 } = await createBridgedAgent({
+    const { agent: shell2, bridge: b2 } = await createAgent({
       run: async (_task, env) => {
         const taskJson = await sh(`curl -s ${env.ROBAL_TASK_URL}`, env);
         const t = JSON.parse(taskJson);
@@ -312,13 +312,13 @@ describe('Bridge: pipelines', () => {
   });
 
   it('pipeline with gate that blocks', async () => {
-    const { agent: a1, bridge: b1 } = await createBridgedAgent({
+    const { agent: a1, bridge: b1 } = await createAgent({
       run: async (_task, env) => {
         await sh(`curl -s -X POST ${env.ROBAL_RESULT_URL} -H 'Content-Type: application/json' -d '{"status":"completed","output":"short"}'`, env);
       },
     });
     bridges.push(b1);
-    const { agent: a2, bridge: b2 } = await createBridgedAgent({
+    const { agent: a2, bridge: b2 } = await createAgent({
       run: async (_task, env) => {
         await sh(`curl -s -X POST ${env.ROBAL_RESULT_URL} -H 'Content-Type: application/json' -d '{"status":"completed","output":"should not reach"}'`, env);
       },
@@ -337,7 +337,7 @@ describe('Bridge: pipelines', () => {
   });
 
   it('pipeline with transform', async () => {
-    const { agent: a1, bridge: b1 } = await createBridgedAgent({
+    const { agent: a1, bridge: b1 } = await createAgent({
       run: async (_task, env) => {
         await sh(`curl -s -X POST ${env.ROBAL_RESULT_URL} -H 'Content-Type: application/json' -d '{"status":"completed","output":"hello world"}'`, env);
       },
@@ -356,7 +356,7 @@ describe('Bridge: pipelines', () => {
   });
 
   it('fan-out: one source to two sinks in parallel', async () => {
-    const { agent: src, bridge: b1 } = await createBridgedAgent({
+    const { agent: src, bridge: b1 } = await createAgent({
       run: async (_task, env) => {
         await sh(`curl -s -X POST ${env.ROBAL_RESULT_URL} -H 'Content-Type: application/json' -d '{"status":"completed","output":"source-data"}'`, env);
       },
@@ -375,7 +375,7 @@ describe('Bridge: pipelines', () => {
   });
 
   it('pipeline stops on failure', async () => {
-    const { agent: failShell, bridge: b1 } = await createBridgedAgent({
+    const { agent: failShell, bridge: b1 } = await createAgent({
       run: async (_task, env) => {
         await sh(`curl -s -X POST ${env.ROBAL_RESULT_URL} -H 'Content-Type: application/json' -d '{"status":"failed","error":"crash"}'`, env);
       },
@@ -397,9 +397,9 @@ describe('Bridge: pipelines', () => {
 
 describe('Bridge: parallel', () => {
   it('runs 3 shell agents in parallel', async () => {
-    const agents: { agent: Agent; bridge: AgentBridge }[] = [];
+    const agents: { agent: Agent; bridge: AgentServer }[] = [];
     for (let i = 0; i < 3; i++) {
-      const { agent, bridge } = await createBridgedAgent({
+      const { agent, bridge } = await createAgent({
         run: async (_task, env) => {
           await delay(10 + Math.random() * 20); // simulate varying latency
           await sh(`curl -s -X POST ${env.ROBAL_RESULT_URL} -H 'Content-Type: application/json' -d '{"status":"completed","output":"agent-${env.ROBAL_TEAM_ID}"}'`, env);
@@ -435,7 +435,7 @@ describe('Bridge: parallel', () => {
 
   it('parallel handles mixed success and failure', async () => {
     const okAgent: Agent = { async execute() { return { status: 'completed', output: 'ok' }; } };
-    const { agent: failShell, bridge } = await createBridgedAgent({
+    const { agent: failShell, bridge } = await createAgent({
       run: async (_task, env) => {
         await sh(`curl -s -X POST ${env.ROBAL_RESULT_URL} -H 'Content-Type: application/json' -d '{"status":"failed","error":"nope"}'`, env);
       },
@@ -469,7 +469,7 @@ describe('Bridge: event observability', () => {
         return { approved: true, confidence: 0.9, feedback: '' };
       },
     };
-    const { agent: shell2, bridge } = await createBridgedAgent({
+    const { agent: shell2, bridge } = await createAgent({
       run: async (_task, env) => {
         await sh(`curl -s -X POST ${env.ROBAL_RESULT_URL} -H 'Content-Type: application/json' -d '{"status":"completed","output":"final"}'`, env);
       },
